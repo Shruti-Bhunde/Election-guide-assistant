@@ -6,31 +6,34 @@ require("dotenv").config();
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
 /**
- * 🔥 Generates COMPLETE response (auto-continues if cut)
+ * 🔥 Safe Gemini call with continuation (production-safe)
  */
-async function generateFullResponse(userMessage) {
-    let fullReply = "";
+async function generateResponse(userMessage) {
+    let finalText = "";
     let attempts = 0;
-    const maxAttempts = 4;
+    const maxAttempts = 3;
 
-    let prompt = `You are an election assistant. 
-Give a COMPLETE, detailed answer with proper structure. Do not stop mid-sentence.
+    let prompt = `You are an election assistant.
+Give a COMPLETE, structured, and clear answer. Do not stop mid-sentence.
 
 User question: ${userMessage}
 
 Answer:`;
 
     while (attempts < maxAttempts) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000);
+
         const response = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
                 body: JSON.stringify({
                     contents: [{ parts: [{ text: prompt }] }],
                     generationConfig: {
@@ -43,42 +46,44 @@ Answer:`;
             }
         );
 
+        clearTimeout(timeout);
+
         const data = await response.json();
 
-        const candidate = data?.candidates?.[0];
+        if (!data?.candidates?.length) {
+            break;
+        }
+
+        const candidate = data.candidates[0];
         const text = candidate?.content?.parts
             ?.map(p => p.text || "")
             .join("") || "";
 
         const finishReason = candidate?.finishReason;
 
-        fullReply += text;
+        finalText += text;
 
-        console.log("Attempt:", attempts + 1);
-        console.log("FinishReason:", finishReason);
-
-        // 🔥 NEW SMART CHECK (IMPORTANT FIX)
+        // 🔥 safer continuation check
         const looksIncomplete =
-            text.trim().length < 80 ||              // too short chunk
-            !/[.!?]$/.test(text.trim());            // ends mid-sentence
+            finishReason === "MAX_TOKENS" ||
+            (text.trim().length < 80 && !/[.!?]$/.test(text.trim()));
 
-        if (!looksIncomplete && finishReason !== "MAX_TOKENS") {
+        if (!looksIncomplete) {
             break;
         }
 
-        // 🔁 continue only if needed
-        prompt = `Continue the answer naturally. Do NOT repeat anything:
+        prompt = `Continue the answer naturally. Do NOT repeat:
 
-${fullReply}`;
+${finalText}`;
 
         attempts++;
     }
 
-    return fullReply || "No response from AI";
+    return finalText || "No response from AI";
 }
 
 
-// ================= CHAT ROUTE =================
+// ================= CHAT API =================
 app.post("/chat", async (req, res) => {
     try {
         const userMessage = req.body.message;
@@ -87,13 +92,13 @@ app.post("/chat", async (req, res) => {
             return res.status(400).json({ reply: "No message provided" });
         }
 
-        const reply = await generateFullResponse(userMessage);
+        const reply = await generateResponse(userMessage);
 
-        return res.json({ reply });
+        res.json({ reply });
 
-    } catch (error) {
-        console.error("❌ SERVER ERROR:", error);
-        return res.status(500).json({ reply: "Server error" });
+    } catch (err) {
+        console.error("SERVER ERROR:", err);
+        res.status(500).json({ reply: "Server error" });
     }
 });
 
@@ -106,7 +111,7 @@ app.get("/", (req, res) => {
 });
 
 
-// ================= START SERVER =================
+// ================= START =================
 const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, () => {

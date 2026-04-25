@@ -40,7 +40,7 @@ async function sendMessage() {
     const loadingMsg = addMessage("Typing...", 'bot');
 
     try {
-        const res = await fetch("http://localhost:8080/chat", {
+        const res = await fetch("/chat", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
