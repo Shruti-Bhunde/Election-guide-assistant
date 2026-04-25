@@ -234,8 +234,12 @@ app.post("/chat", async (req, res) => {
 
 
 // ================= HEALTH CHECK (IMPORTANT) =================
+const path = require("path");
+
+app.use(express.static(path.join(__dirname, "frontend")));
+
 app.get("/", (req, res) => {
-    res.send("API is running");
+    res.sendFile(path.join(__dirname, "frontend", "index.html"));
 });
 
 
