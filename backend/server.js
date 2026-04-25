@@ -1,123 +1,79 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const cors = require("cors");
-console.log("Fetch type:", typeof fetch);
+const path = require("path");
 require("dotenv").config();
+
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// Route
-// app.post("/chat", async (req, res) => {
-//     try {
-//         const userMessage = req.body.message;
+// 🔹 Serve frontend
+app.use(express.static(path.join(__dirname, "../frontend")));
 
-//         console.log("User:", userMessage);
-
-//         const response = await fetch("https://api.openai.com/v1/responses", {
-//             method: "POST",
-//             headers: {
-//                 "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-//                 "Content-Type": "application/json"
-//             },
-//             body: JSON.stringify({
-//                 model: "gpt-4.1-mini",
-//                 input: userMessage
-//             })
-//         });
-
-//         const data = await response.json();
-
-//         console.log("API RESPONSE:", data);
-
-//         const reply =
-//             data.output?.[0]?.content?.[0]?.text ||
-//             "Sorry, I couldn't understand that.";
-
-//         res.json({ reply });
-
-//     } catch (err) {
-//         console.error("❌ ERROR:", err);
-//         res.status(500).json({ reply: "Server error" });
-//     }
-// });
-app.post("/chat", async (req, res) => {
-    const userMessage = req.body.message;
-
-    try {
-        const response = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-                Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini",
-                messages: [
-                    {
-                        role: "system",
-                        content: "You are an election assistant. Explain things simply and clearly to first-time voters."
-                    },
-                    {
-                        role: "user",
-                        content: userMessage
-                    }
-                ]
-            })
-        });
-
-        const data = await response.json();
-
-        res.json({
-            reply: data.choices?.[0]?.message?.content || "No response from AI"
-        });
-
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ reply: "Server error" });
-    }
-});
-
+// 🔹 Chat Route (Gemini)
 app.post("/chat", async (req, res) => {
     try {
-        console.log("Incoming:", req.body);
-
         const userMessage = req.body.message;
 
         if (!userMessage) {
-            return res.status(400).json({ reply: "No message" });
+            return res.status(400).json({ reply: "No message provided" });
         }
 
-        const response = await fetch("https://api.openai.com/v1/responses", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "gpt-4.1-mini",
-                input: userMessage
-            })
-        });
+        const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            parts: [{ text: `You are an election assistant. Answer clearly:\n${userMessage}` }]
+                        }
+                    ],
+                    generationConfig: {
+                        maxOutputTokens: 200,
+                        temperature: 0.7
+                    }
+                })
+            }
+        );
 
-        const text = await response.text();
-        console.log("RAW:", text);
+        const data = await response.json();
 
-        const data = JSON.parse(text);
+        console.log("RAW GEMINI RESPONSE:", JSON.stringify(data, null, 2));
 
-        res.json({
-            reply: data.output?.[0]?.content?.[0]?.text || "No response"
-        });
+        if (!response.ok) {
+            console.error("❌ Gemini API Error:", data);
+            return res.status(500).json({
+                reply: "Gemini API error"
+            });
+        }
 
-    } catch (err) {
-        console.error("❌ ERROR:", err);
-        res.status(500).json({ reply: "Server error" });
+        let reply = data?.candidates?.[0]?.content?.parts
+            ?.map(p => p.text)
+            ?.join("") || "No response from AI";
+
+        return res.json({ reply });
+
+    } catch (error) {
+        console.error("❌ SERVER ERROR:", error);
+        return res.status(500).json({ reply: "Server error" });
     }
 });
 
-// Start server
-app.listen(3000, () => {
-    console.log("Server running on http://localhost:3000");
+// 🔹 Fallback route (important for frontend routing)
+app.get("*", (req, res) => {
+    res.sendFile(path.join(__dirname, "../frontend/index.html"));
+});
+
+// 🔹 Cloud Run PORT fix
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
