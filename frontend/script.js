@@ -21,6 +21,11 @@ const chatInput = document.getElementById('chatInput');
 
 function toggleChat() {
     chatPanel.style.display = chatPanel.style.display === 'flex' ? 'none' : 'flex';
+
+    // auto focus input when opened
+    if (chatPanel.style.display === 'flex') {
+        setTimeout(() => chatInput.focus(), 100);
+    }
 }
 
 async function sendMessage() {
@@ -35,8 +40,7 @@ async function sendMessage() {
     const loadingMsg = addMessage("Typing...", 'bot');
 
     try {
-        // const res = await fetch("http://localhost:3000/chat", { for development
-        const res = await fetch("/chat", {
+        const res = await fetch("http://localhost:8080/chat", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -44,30 +48,51 @@ async function sendMessage() {
             body: JSON.stringify({ message: text })
         });
 
-        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(`HTTP error! Status: ${res.status}`);
+        }
 
-        // Replace loading text with actual response
-        loadingMsg.textContent = data.reply;
+        const data = await res.json();
+        console.log("API RESPONSE:", data);
+
+        // Replace loading message safely
+        if (data && data.reply) {
+            loadingMsg.innerHTML = formatText(data.reply);
+        } else {
+            loadingMsg.textContent = "⚠️ No response from server";
+        }
 
     } catch (err) {
-        console.error(err);
+        console.error("CHAT ERROR:", err);
         loadingMsg.textContent = "⚠️ Unable to connect. Make sure server is running.";
     }
+}
+
+// helper to format text nicely
+function formatText(text) {
+    return text
+        .replace(/\n/g, "<br>")        // preserve line breaks
+        .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>"); // simple bold support
 }
 
 function addMessage(text, sender) {
     const msg = document.createElement('div');
     msg.className = `msg msg-${sender}`;
-    msg.textContent = text;
+
+    // safer rendering
+    msg.innerHTML = formatText(text);
 
     chatMessages.appendChild(msg);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
-    return msg; // important for updating "Typing..."
+    return msg;
 }
 
 function handleChatEnter(e) {
-    if (e.key === 'Enter') sendMessage();
+    if (e.key === 'Enter') {
+        e.preventDefault(); // prevent newline
+        sendMessage();
+    }
 }
 
 
